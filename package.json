@@ -13,7 +13,8 @@
     "protobufjs": "^5.0.1",
     "request": "^2.73.0",
     "s2geometry-node": "^1.3.0",
-    "tape": "^4.6.0"
+    "tape": "^4.6.0",
+    "node-pogo-signature":"https://github.com/segura2010/node-pogo-signature.git"
   },
   "scripts": {
     "test": "istanbul cover node_modules/tape/bin/tape tests/**/*.js"

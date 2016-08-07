@@ -2,7 +2,7 @@ message RequestEnvelop {
   required int32 unknown1 = 1;
   optional int64 rpc_id = 3;
   repeated Requests requests = 4;
-  optional Unknown6 unknown6 = 6;
+  optional Unknown6 signature = 6;
   optional double latitude = 7;
   optional double longitude = 8;
   optional double altitude = 9;
@@ -14,12 +14,107 @@ message RequestEnvelop {
     optional bytes message = 2;
   }
 
+  message Signature {
+
+    message LocationFix {
+        required string provider = 1; // "network", "gps", "fused", possibly others
+        optional uint64 timestamp_since_start = 2; // in ms
+        optional float latitude = 13;
+        optional float longitude = 14;
+
+        // ??? shows up in struct, dunno where these go
+        // float device_speed;
+        // float device_course;
+        optional float horizontal_accuracy = 20; // iOS only? (range seems to be -1 to +1)
+        optional float altitude = 21;
+        optional float vertical_accuracy = 22; // iOS only? (range seems to be ~10-12)
+        optional uint64 provider_status = 26; // Usually 3 (possibly GPS status: 1 = no fix, 2 = acquiring/inaccurate, 3 = fix acquired)
+                           // On iOS there are some LocationFixes with unk26=1 and everything else empty
+        optional uint32 floor = 27; // No idea what this is, seems to be optional
+        optional uint64 location_type = 28; // Always 1 (if there is data at all)
+    }
+
+    // don't really care about this since we're not using it
+    message AndroidGpsInfo {
+        optional uint64 time_to_fix = 1;
+        repeated int32 satellites_prn = 2;
+        repeated float snr = 3;
+        repeated float azimuth = 4;
+        repeated float elevation = 5; 
+        repeated bool has_almanac = 6;
+        repeated bool has_ephemeris = 7;
+        repeated bool used_in_fix = 8;
+    }
+
+    message SensorInfo {
+        optional uint64 timestamp_snapshot = 1; // in ms
+        optional double magnetometer_x = 3;
+        optional double magnetometer_y = 4;
+        optional double magnetometer_z = 5;
+        optional double angle_normalized_x = 6;
+        optional double angle_normalized_y = 7;
+        optional double angle_normalized_z = 8;
+        optional double accel_raw_x = 10;
+        optional double accel_raw_y = 11;
+        optional double accel_raw_z = 12;
+        optional double gyroscope_raw_x = 13;
+        optional double gyroscope_raw_y = 14;
+        optional double gyroscope_raw_z = 15;
+        optional double accel_normalized_x = 16;
+        optional double accel_normalized_y = 17;
+        optional double accel_normalized_z = 18;
+        optional uint64 accelerometer_axes = 19; // Always 3
+    }
+
+    message DeviceInfo {
+        optional string device_id = 1; // Hex string
+        optional string android_board_name = 2;
+        optional string android_bootloader = 3;
+        optional string device_brand = 4; // On Android: product.brand
+        optional string device_model = 5; // On Android: product.device
+        optional string device_model_identifier = 6; // Android only, build.display.id
+        optional string device_model_boot = 7;  // On Android: boot.hardware
+        optional string hardware_manufacturer = 8; // On Android: product.manufacturer
+        optional string hardware_model = 9;  // On Android: product.model
+        optional string firmware_brand = 10; // On Android: product.name, on iOS: "iPhone OS"
+        optional string firmware_tags = 12; // Android only, build.tags
+        optional string firmware_type = 13; // On Android: build.type, on iOS instead: iOS version
+        optional string firmware_fingerprint = 14; // Android only, build.fingerprint
+    }
+
+    message ActivityStatus {
+        // all of these had 1 as their value
+        optional uint64 start_time_ms = 1;
+        optional bool unknown_status = 2;
+        optional bool walking = 3;
+        optional bool running = 4;
+        optional bool stationary = 5;
+        optional bool automotive = 6;
+        optional bool tilting = 7;
+        optional bool cycling = 8;
+        optional bytes status = 9;
+    }
+
+    optional uint64 timestamp_since_start = 2; // in ms
+    repeated LocationFix location_fix = 4;
+    optional AndroidGpsInfo gps_info = 5;
+    optional SensorInfo sensor_info = 7;
+    optional DeviceInfo device_info = 8;
+    optional ActivityStatus activity_status = 9;
+    optional uint32 location_hash1 = 10; // Location1 hashed based on the auth_token - xxHash32
+    optional uint32 location_hash2 = 20; // Location2 hashed based on the auth_token - xxHash32
+    optional bytes unk22 = 22; // possibly replay check. Generation unknown but pointed to by 0001B8614
+    optional uint64 timestamp = 23; // epoch timestamp in ms
+    repeated uint64 request_hash = 24; // hashes of each request message in a hashArray - xxhash64
+
+  }
+
   message Unknown3 {
     required string unknown4 = 1;
   }
 
   message Unknown6 {
-    required int32 unknown1 = 1;
+    required int32 type = 1;
     required Unknown2 unknown2 = 2;
 
     message Unknown2 {

@@ -18,6 +18,8 @@ var ProtoBuf = require('protobufjs');
 var GoogleOAuth = require('gpsoauthnode');
 var fs = require('fs');
 var s2 = require('s2geometry-node');
+var signature = require('node-pogo-signature');
+var crypto = require('crypto');
 
 var Logins = require('./logins');
 
@@ -83,6 +85,8 @@ function Pokeio() {
     apiEndpoint: ''
   };
 
+  self.START_TIME = Date.now(); // for timestamp_since_start in Signature
+
   self.DebugPrint = function (str) {
     if (self.playerInfo.debug === true) {
       //self.events.emit('debug',str)
@@ -97,57 +101,116 @@ function Pokeio() {
       token: new RequestEnvelop.AuthInfo.JWT(access_token, 59)
     });
 
-    var f_req = new RequestEnvelop({
-      unknown1: 2,
-      rpc_id: 1469378659230941192,
+    self.generateSignature(auth, req, function(err, u6){
+        var f_req = new RequestEnvelop({
+          unknown1: 2,
+          rpc_id: 1469378659230941192,
 
-      requests: req,
+          requests: req,
+          signature: u6,
 
-      latitude: self.playerInfo.latitude,
-      longitude: self.playerInfo.longitude,
-      altitude: self.playerInfo.altitude,
+          latitude: self.playerInfo.latitude,
+          longitude: self.playerInfo.longitude,
+          altitude: self.playerInfo.altitude,
 
-      auth: auth,
-      unknown12: 989
+          auth: auth,
+          unknown12: 989
+        });
+
+        var protobuf = f_req.encode().toBuffer();
+
+        var options = {
+          url: api_endpoint,
+          body: protobuf,
+          encoding: null,
+          headers: {
+            'User-Agent': 'Niantic App'
+          }
+        };
+
+        self.request.post(options, function (err, response, body) {
+          if (err) {
+            return callback(new Error('Error'));
+          }
+
+          if (response === undefined || body === undefined) {
+            console.error('[!] RPC Server offline');
+            return callback(new Error('RPC Server offline'));
+          }
+
+          var f_ret;
+          try {
+            f_ret = ResponseEnvelop.decode(body);
+          } catch (e) {
+            if (e.decoded) {
+              // Truncated
+              console.warn(e);
+              f_ret = e.decoded; // Decoded message with missing required fields
+            }
+          }
+
+          if (f_ret) {
+            return callback(null, f_ret);
+          } else {
+            api_req(api_endpoint, access_token, req, callback);
+          }
+        });
+
     });
+  }
 
-    var protobuf = f_req.encode().toBuffer();
+  self.generateSignature = function(auth, req, callback)
+  {
+    var token = auth.encode().toBuffer();
 
-    var options = {
-      url: api_endpoint,
-      body: protobuf,
-      encoding: null,
-      headers: {
-        'User-Agent': 'Niantic App'
-      }
-    };
+    var lh1 = signature.utils.hashLocation1(token, self.playerInfo.latitude, self.playerInfo.longitude, self.playerInfo.altitude);
+    var lh2 = signature.utils.hashLocation2(self.playerInfo.latitude, self.playerInfo.longitude, self.playerInfo.altitude);
 
-    self.request.post(options, function (err, response, body) {
-      if (err) {
-        return callback(new Error('Error'));
-      }
-
-      if (response === undefined || body === undefined) {
-        console.error('[!] RPC Server offline');
-        return callback(new Error('RPC Server offline'));
-      }
-
-      var f_ret;
-      try {
-        f_ret = ResponseEnvelop.decode(body);
-      } catch (e) {
-        if (e.decoded) {
-          // Truncated
-          console.warn(e);
-          f_ret = e.decoded; // Decoded message with missing required fields
+    var signatureArray = [];
+    if(req)
+    {
+        for(var i in req)
+        {
+            if(req[i] && req[i].encode )
+            {
+                var reqBuf = req[i].encode().toBuffer();
+                var sig = signature.utils.hashRequest(auth, reqBuf);
+                sig = require('long').fromString(sig.toString().substring(2), true, 16);
+                signatureArray.push( parseInt(sig) );
+            }
+            else
+            {
+                return callback("?", null);
+            }
         }
-      }
+    }
 
-      if (f_ret) {
-        return callback(null, f_ret);
-      } else {
-        api_req(api_endpoint, access_token, req, callback);
-      }
+    var unk22 = crypto.randomBytes(32);
+    var timestamp = Date.now();
+    var timestamp_since_start = timestamp - self.START_TIME;
+
+    var signatureResult = new RequestEnvelop.Signature({
+        location_hash1: parseInt(lh1),
+        location_hash2: parseInt(lh2),
+        request_hash: signatureArray,
+        timestamp_since_start: parseInt(timestamp_since_start),
+        timestamp: parseInt(timestamp),
+        unk22: unk22
+    });
+    console.log(signatureResult);
+
+    var iv = crypto.randomBytes(32);
+    var finalSignature = signature.encrypt(signatureResult.encode().toBuffer(), iv, function(err, result){
+        if(err) return callback(err, null);
+
+        var u6 = new RequestEnvelop.Unknown6({
+            type: 6,
+            unknown2: new RequestEnvelop.Unknown6.Unknown2({
+                unknown1: result
+            })
+        });
+
+        callback(null, u6);
     });
   }
 
@@ -155,6 +218,8 @@ function Pokeio() {
     if (provider !== 'ptc' && provider !== 'google') {
       return callback(new Error('Invalid provider'));
     }
+    // update start time
+    self.START_TIME = Date.now();
     // set provider
     self.playerInfo.provider = provider;
     // Updating location
